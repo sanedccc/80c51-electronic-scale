@@ -1,0 +1,60 @@
+version: "4.1"
+name: Project
+type: C51
+deviceName: null
+packDir: null
+srcDirs: []
+virtualFolder:
+  name: <virtual_root>
+  files: []
+  folders:
+    - name: Source Group 1
+      files:
+        - path: main.c
+        - path: LCD1602.c
+        - path: LCD1602.h
+        - path: Key.c
+        - path: Key.h
+        - path: DS1302.c
+        - path: DS1302.h
+        - path: Buzzer.c
+        - path: Buzzer.h
+        - path: DHT11.c
+        - path: DHT11.h
+      folders: []
+dependenceList: []
+outDir: build
+miscInfo:
+  uid: 9b700aaed6ce5a3af9cd5ce3f7573a5b
+targets:
+  Target 1:
+    cppPreprocessAttrs:
+      defineList: []
+      incList:
+        - ../../../../../Keil_v5/C51/INC/Atmel
+      libList: []
+    excludeList: []
+    toolchain: Keil_C51
+    toolchainConfigMap:
+      Keil_C51:
+        options:
+          version: 2
+          afterBuildTasks: []
+          asm-compiler: {}
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            optimization-level: level-8
+            optimization-type: SPEED
+          global:
+            ram-mode: SMALL
+            rom-mode: LARGE
+          linker:
+            misc-controls: ""
+            output-format: elf
+            remove-unused: true
+    uploadConfigMap:
+      Custom:
+        bin: ""
+        commandLine: ""
+        eraseChipCommand: ""
+    uploader: Custom
