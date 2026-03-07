@@ -21,7 +21,10 @@
 
 #define HX711_READY_STABLE_COUNT   3
 #define HX711_WAIT_READY_TIMEOUT   250000UL
+#define HX711_SAMPLE_TIMEOUT_TICKS 50UL
 #define HX711_SPIKE_THRESHOLD_COUNTS  5000000L
+#define HX711_SPIKE_CONFIRM_COUNT   2
+#define HX711_SPIKE_CONFIRM_WINDOW_COUNTS 100000L
 #define HX711_SAT_MARGIN_COUNTS     1000L
 
 // 重量噪声阈值，低于此值视为0
@@ -55,6 +58,10 @@ bit g_isFirstSample = 1;
 
 static long idata g_lastRawValid = 0;
 static bit  idata g_hasLastRaw  = 0;
+static bit  idata g_hx711Fault = 0;
+static long idata g_pendingRaw = 0;
+static unsigned char idata g_pendingRawCount = 0;
+static unsigned long idata g_lastHx711SampleTick10ms = 0;
 
 unsigned long idata UnitPrice_x100 = 0;
 
@@ -89,8 +96,8 @@ long Filter_Weight(long raw);
 
 static bit  HX711_IsReadyStable(void);
 static bit  HX711_WaitReady(unsigned long timeout);
-static long HX711_ReadRawSafe(void);
-static long HX711_ReadRawSpikeRejected(void);
+static bit  HX711_IsDiffOver(long a, long b, long threshold);
+static bit  HX711_ReadRawFiltered(long* raw);
 static void ResetInput(void);
 static void ShowInputStringIfDirty(void);
 static unsigned long ParsePriceToX100(const char* str);
@@ -106,6 +113,7 @@ static void Screen_Off(void);
 static void Screen_On(void);
 static void MarkActivity(void);
 static unsigned long ReadUptime10msSafe(void);
+static void UpdateHX711FaultState(void);
 
 void Timer0_Init(void)
 {
@@ -190,42 +198,64 @@ static bit HX711_IsSaturatedLike(long raw)
     return 0;
 }
 
-static long HX711_ReadRawSafe(void)
+static bit HX711_IsDiffOver(long a, long b, long threshold)
 {
-    if(!HX711_WaitReady(HX711_WAIT_READY_TIMEOUT))
-    {
-        return g_hasLastRaw ? g_lastRawValid : 0L;
-    }
-    return (long)GetWeight_NoWait();
+    if(a >= b) return (a - b) > threshold;
+    return (b - a) > threshold;
 }
 
-static long HX711_ReadRawSpikeRejected(void)
+static bit HX711_ReadRawFiltered(long* raw)
 {
-    long raw = HX711_ReadRawSafe();
+    long current = (long)GetWeight_NoWait();
 
-    if(HX711_IsSaturatedLike(raw))
+    if(HX711_IsSaturatedLike(current))
     {
-        return g_hasLastRaw ? g_lastRawValid : raw;
+        g_hx711Fault = 1;
+        g_pendingRawCount = 0;
+        return 0;
     }
 
     if(!g_hasLastRaw)
     {
-        g_lastRawValid = raw;
+        g_lastRawValid = current;
         g_hasLastRaw = 1;
-        return raw;
+        g_hx711Fault = 0;
+        g_pendingRawCount = 0;
+        g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+        *raw = current;
+        return 1;
     }
 
-    if(raw > g_lastRawValid)
+    if(HX711_IsDiffOver(current, g_lastRawValid, HX711_SPIKE_THRESHOLD_COUNTS))
     {
-        if((raw - g_lastRawValid) > HX711_SPIKE_THRESHOLD_COUNTS) return g_lastRawValid;
-    }
-    else
-    {
-        if((g_lastRawValid - raw) > HX711_SPIKE_THRESHOLD_COUNTS) return g_lastRawValid;
+        if(g_pendingRawCount > 0 && !HX711_IsDiffOver(current, g_pendingRaw, HX711_SPIKE_CONFIRM_WINDOW_COUNTS))
+        {
+            g_pendingRaw = current;
+            g_pendingRawCount++;
+            if(g_pendingRawCount >= HX711_SPIKE_CONFIRM_COUNT)
+            {
+                g_lastRawValid = current;
+                g_pendingRawCount = 0;
+                g_hx711Fault = 0;
+                g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+                *raw = current;
+                return 1;
+            }
+        }
+        else
+        {
+            g_pendingRaw = current;
+            g_pendingRawCount = 1;
+        }
+        return 0;
     }
 
-    g_lastRawValid = raw;
-    return raw;
+    g_lastRawValid = current;
+    g_pendingRawCount = 0;
+    g_hx711Fault = 0;
+    g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+    *raw = current;
+    return 1;
 }
 
 long Filter_Weight(long raw)
@@ -435,11 +465,34 @@ static void UpdateScaleDisplay(void)
     bit neg;
 
     ShowInputStringIfDirty();
+    UpdateHX711FaultState();
 
     if(g_priceDirty)
     {
         g_priceDirty = 0;
         UnitPrice_x100 = (InputIndex == 0) ? 0 : ParsePriceToX100(InputBuf);
+    }
+
+    if(g_hx711Fault)
+    {
+        Buzzer_Off();
+        if(lastWeightNeg)
+        {
+            LCD_ShowChar(1, 3, ' ');
+            lastWeightNeg = 0;
+        }
+        LCD_ShowString(1, 4, " ERR ");
+        if(lastTotal_fen != 0 || UnitPrice_x100 != lastUnitPrice_x100)
+        {
+            lastTotal_fen = 0;
+            lastUnitPrice_x100 = UnitPrice_x100;
+            LCD_ShowNum(2, 11, 0, 3);
+            LCD_ShowNum(2, 15, 0, 2);
+        }
+        lastNetWeight = 0x7FFFFFFF;
+        NetWeight = 0;
+        NetWeightAbs = 0;
+        return;
     }
 
     WeightDiff = TotalResult - FurResult;
@@ -485,6 +538,14 @@ static void UpdateScaleDisplay(void)
 static void UpdateScaleLogicOnly(void)
 {
     long WeightDiff;
+    UpdateHX711FaultState();
+    if(g_hx711Fault)
+    {
+        NetWeight = 0;
+        NetWeightAbs = 0;
+        Buzzer_Off();
+        return;
+    }
     WeightDiff = TotalResult - FurResult;
     NetWeight = CalcNetWeightFromDiff(WeightDiff);
     if(NetWeight >= -WEIGHT_NOISE_THRESHOLD && NetWeight <= WEIGHT_NOISE_THRESHOLD) NetWeight = 0;
@@ -542,6 +603,20 @@ static unsigned long ReadUptime10msSafe(void)
     return t;
 }
 
+static void UpdateHX711FaultState(void)
+{
+    unsigned long now = ReadUptime10msSafe();
+
+    if(g_hasLastRaw)
+    {
+        if((now - g_lastHx711SampleTick10ms) >= HX711_SAMPLE_TIMEOUT_TICKS) g_hx711Fault = 1;
+    }
+    else
+    {
+        if(now >= HX711_SAMPLE_TIMEOUT_TICKS) g_hx711Fault = 1;
+    }
+}
+
 static void MarkActivity(void)
 {
     g_lastActivityTick10ms = ReadUptime10msSafe();
@@ -595,20 +670,43 @@ void main(void)
 
     Timer0_Init();
 
-    HX711_WaitReady(HX711_WAIT_READY_TIMEOUT);
-
-    rawWeight = HX711_ReadRawSafe();
-    FurResult = Filter_Weight(rawWeight);
-    g_lastRawValid = rawWeight;
-    g_hasLastRaw = 1;
+    if(HX711_WaitReady(HX711_WAIT_READY_TIMEOUT))
+    {
+        rawWeight = (long)GetWeight_NoWait();
+        if(HX711_IsSaturatedLike(rawWeight))
+        {
+            g_hx711Fault = 1;
+        }
+        else
+        {
+            FurResult = Filter_Weight(rawWeight);
+            TotalResult = FurResult;
+            g_lastRawValid = rawWeight;
+            g_hasLastRaw = 1;
+            g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+        }
+    }
+    else
+    {
+        g_hx711Fault = 1;
+    }
 
     for(key=0; key<10; key++)
     {
-        rawWeight = HX711_ReadRawSafe();
+        if(!HX711_WaitReady(HX711_WAIT_READY_TIMEOUT)) break;
+        rawWeight = (long)GetWeight_NoWait();
+        if(HX711_IsSaturatedLike(rawWeight))
+        {
+            g_hx711Fault = 1;
+            break;
+        }
+        TotalResult = Filter_Weight(rawWeight);
+        FurResult = TotalResult;
+        g_lastRawValid = rawWeight;
+        g_hasLastRaw = 1;
+        g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+        g_hx711Fault = 0;
     }
-    rawWeight = HX711_ReadRawSafe();
-    FurResult = Filter_Weight(rawWeight);
-    g_lastRawValid = rawWeight;
 
     SystemMode = 0;
     Init_Display();
@@ -636,18 +734,21 @@ void main(void)
 
                 if(SystemMode == 0 && HX711_IsReadyStable())
                 {
-                    rawWeight = HX711_ReadRawSpikeRejected();
-                    TotalResult = Filter_Weight(rawWeight);
+                    if(HX711_ReadRawFiltered(&rawWeight))
                     {
-                        long d = TotalResult - g_lastTotalForActivity;
-                        if(d > RAW_ACTIVITY_THRESHOLD || d < -RAW_ACTIVITY_THRESHOLD)
+                        TotalResult = Filter_Weight(rawWeight);
                         {
-                            g_lastTotalForActivity = TotalResult;
-                            if(g_screenOff) Screen_On();
-                            MarkActivity();
+                            long d = TotalResult - g_lastTotalForActivity;
+                            if(d > RAW_ACTIVITY_THRESHOLD || d < -RAW_ACTIVITY_THRESHOLD)
+                            {
+                                g_lastTotalForActivity = TotalResult;
+                                if(g_screenOff) Screen_On();
+                                MarkActivity();
+                            }
                         }
                     }
                 }
+                if(SystemMode == 0) UpdateHX711FaultState();
             }
 
             while(g_evt200ms)

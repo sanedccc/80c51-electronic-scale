@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   KEY                                                               02/20/2026 19:33:21 PAGE 1   
+C51 COMPILER V9.60.0.0   KEY                                                               03/07/2026 19:17:29 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE KEY
@@ -62,7 +62,7 @@ line level    source
   52   2              if (COL2 == 0) KeyNumber = 0;
   53   2              if (COL3 == 0) KeyNumber = 15; // Dot
   54   2              if (COL4 == 0) KeyNumber = 13; // DHT11
-C51 COMPILER V9.60.0.0   KEY                                                               02/20/2026 19:33:21 PAGE 2   
+C51 COMPILER V9.60.0.0   KEY                                                               03/07/2026 19:17:29 PAGE 2   
 
   55   2          }
   56   1          

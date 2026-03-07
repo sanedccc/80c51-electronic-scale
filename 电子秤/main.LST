@@ -1,4 +1,4 @@
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 1   
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 1   
 
 
 C51 COMPILER V9.60.0.0, COMPILATION OF MODULE MAIN
@@ -31,725 +31,831 @@ line level    source
   21          
   22          #define HX711_READY_STABLE_COUNT   3
   23          #define HX711_WAIT_READY_TIMEOUT   250000UL
-  24          #define HX711_SPIKE_THRESHOLD_COUNTS  5000000L
-  25          #define HX711_SAT_MARGIN_COUNTS     1000L
-  26          
-  27          // 重量噪声阈值，低于此值视为0
-  28          #define WEIGHT_NOISE_THRESHOLD 1
+  24          #define HX711_SAMPLE_TIMEOUT_TICKS 50UL
+  25          #define HX711_SPIKE_THRESHOLD_COUNTS  5000000L
+  26          #define HX711_SPIKE_CONFIRM_COUNT   2
+  27          #define HX711_SPIKE_CONFIRM_WINDOW_COUNTS 100000L
+  28          #define HX711_SAT_MARGIN_COUNTS     1000L
   29          
-  30          sbit HX711_OUT = P3^2;
-  31          sbit HX711_SCK = P3^3;
+  30          // 重量噪声阈值，低于此值视为0
+  31          #define WEIGHT_NOISE_THRESHOLD 1
   32          
-  33          volatile unsigned char g_tick10ms = 0;   
-  34          volatile unsigned char g_evt200ms = 0;   
-  35          volatile unsigned char g_evt500ms = 0;   
-  36          
-  37          volatile unsigned long g_uptime10ms = 0;
-  38          
-  39          #define SCREEN_OFF_TIMEOUT_TICKS 500UL
-  40          #define RAW_ACTIVITY_THRESHOLD   800L
+  33          sbit HX711_OUT = P3^2;
+  34          sbit HX711_SCK = P3^3;
+  35          
+  36          volatile unsigned char g_tick10ms = 0;   
+  37          volatile unsigned char g_evt200ms = 0;   
+  38          volatile unsigned char g_evt500ms = 0;   
+  39          
+  40          volatile unsigned long g_uptime10ms = 0;
   41          
-  42          static bit idata g_screenOff = 0;
-  43          
-  44          static unsigned long idata g_lastActivityTick10ms = 0;
-  45          static long idata g_lastTotalForActivity          = 0;
+  42          #define SCREEN_OFF_TIMEOUT_TICKS 500UL
+  43          #define RAW_ACTIVITY_THRESHOLD   800L
+  44          
+  45          static bit idata g_screenOff = 0;
   46          
-  47          long idata FurResult = 0;
-  48          long idata TotalResult = 0;
-  49          long idata NetWeight = 0;
-  50          unsigned long idata NetWeightAbs = 0;
-  51          
-  52          long xdata Weight_Buffer[FILTER_SIZE] = {0};
-  53          unsigned char Filter_Index = 0;
-  54          bit g_isFirstSample = 1;
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 2   
+  47          static unsigned long idata g_lastActivityTick10ms = 0;
+  48          static long idata g_lastTotalForActivity          = 0;
+  49          
+  50          long idata FurResult = 0;
+  51          long idata TotalResult = 0;
+  52          long idata NetWeight = 0;
+  53          unsigned long idata NetWeightAbs = 0;
+  54          
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 2   
 
-  55          
-  56          static long idata g_lastRawValid = 0;
-  57          static bit  idata g_hasLastRaw  = 0;
+  55          long xdata Weight_Buffer[FILTER_SIZE] = {0};
+  56          unsigned char Filter_Index = 0;
+  57          bit g_isFirstSample = 1;
   58          
-  59          unsigned long idata UnitPrice_x100 = 0;
-  60          
-  61          char idata InputBuf[8] = {0};
-  62          unsigned char idata InputIndex = 0;
-  63          
-  64          static signed char idata g_dotPos = -1;      
-  65          static unsigned char idata g_fracDigits = 0; 
-  66          static bit idata g_inputDirty = 0;
-  67          static bit idata g_priceDirty = 0;
-  68          
-  69          unsigned char idata SystemMode = 0;
+  59          static long idata g_lastRawValid = 0;
+  60          static bit  idata g_hasLastRaw  = 0;
+  61          static bit  idata g_hx711Fault = 0;
+  62          static long idata g_pendingRaw = 0;
+  63          static unsigned char idata g_pendingRawCount = 0;
+  64          static unsigned long idata g_lastHx711SampleTick10ms = 0;
+  65          
+  66          unsigned long idata UnitPrice_x100 = 0;
+  67          
+  68          char idata InputBuf[8] = {0};
+  69          unsigned char idata InputIndex = 0;
   70          
-  71          unsigned int idata year;
-  72          unsigned char idata month, day, hour, minute, second;
-  73          
-  74          unsigned int idata dht_temp = 0;
-  75          unsigned int idata dht_humi = 0;
-  76          unsigned char idata dht_div = 0;
+  71          static signed char idata g_dotPos = -1;      
+  72          static unsigned char idata g_fracDigits = 0; 
+  73          static bit idata g_inputDirty = 0;
+  74          static bit idata g_priceDirty = 0;
+  75          
+  76          unsigned char idata SystemMode = 0;
   77          
-  78          static long idata lastNetWeight = 0x7FFFFFFF;
-  79          static unsigned long idata lastUnitPrice_x100 = 0xFFFFFFFFUL;
-  80          static unsigned long idata lastTotal_fen = 0xFFFFFFFFUL; 
-  81          static bit idata lastWeightNeg = 0;
-  82          static unsigned int idata last_dht_temp = 0xFFFF;
-  83          static unsigned int idata last_dht_humi = 0xFFFF;
+  78          unsigned int idata year;
+  79          unsigned char idata month, day, hour, minute, second;
+  80          
+  81          unsigned int idata dht_temp = 0;
+  82          unsigned int idata dht_humi = 0;
+  83          unsigned char idata dht_div = 0;
   84          
-  85          void Timer0_Init(void);
-  86          void Delay(unsigned int t);
-  87          unsigned long GetWeight_NoWait(void);
-  88          long Filter_Weight(long raw);
-  89          
-  90          static bit  HX711_IsReadyStable(void);
-  91          static bit  HX711_WaitReady(unsigned long timeout);
-  92          static long HX711_ReadRawSafe(void);
-  93          static long HX711_ReadRawSpikeRejected(void);
-  94          static void ResetInput(void);
-  95          static void ShowInputStringIfDirty(void);
-  96          static unsigned long ParsePriceToX100(const char* str);
-  97          static void Init_Display(void);
-  98          static void ProcessKey(unsigned char key);
-  99          static long CalcNetWeightFromDiff(long diff);
- 100          static void UpdateScaleDisplay(void);
- 101          static void UpdateScaleLogicOnly(void);
- 102          static void UpdateClockDisplay(void);
- 103          static void UpdateDHTDisplay(void);
- 104          
- 105          static void Screen_Off(void);
- 106          static void Screen_On(void);
- 107          static void MarkActivity(void);
- 108          static unsigned long ReadUptime10msSafe(void);
- 109          
- 110          void Timer0_Init(void)
- 111          {
- 112   1          TMOD &= 0xF0;
- 113   1          TMOD |= 0x01;      
- 114   1          TL0 = 0x00;
- 115   1          TH0 = 0xDC;
- 116   1          TF0 = 0;
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 3   
+  85          static long idata lastNetWeight = 0x7FFFFFFF;
+  86          static unsigned long idata lastUnitPrice_x100 = 0xFFFFFFFFUL;
+  87          static unsigned long idata lastTotal_fen = 0xFFFFFFFFUL; 
+  88          static bit idata lastWeightNeg = 0;
+  89          static unsigned int idata last_dht_temp = 0xFFFF;
+  90          static unsigned int idata last_dht_humi = 0xFFFF;
+  91          
+  92          void Timer0_Init(void);
+  93          void Delay(unsigned int t);
+  94          unsigned long GetWeight_NoWait(void);
+  95          long Filter_Weight(long raw);
+  96          
+  97          static bit  HX711_IsReadyStable(void);
+  98          static bit  HX711_WaitReady(unsigned long timeout);
+  99          static bit  HX711_IsDiffOver(long a, long b, long threshold);
+ 100          static bit  HX711_ReadRawFiltered(long* raw);
+ 101          static void ResetInput(void);
+ 102          static void ShowInputStringIfDirty(void);
+ 103          static unsigned long ParsePriceToX100(const char* str);
+ 104          static void Init_Display(void);
+ 105          static void ProcessKey(unsigned char key);
+ 106          static long CalcNetWeightFromDiff(long diff);
+ 107          static void UpdateScaleDisplay(void);
+ 108          static void UpdateScaleLogicOnly(void);
+ 109          static void UpdateClockDisplay(void);
+ 110          static void UpdateDHTDisplay(void);
+ 111          
+ 112          static void Screen_Off(void);
+ 113          static void Screen_On(void);
+ 114          static void MarkActivity(void);
+ 115          static unsigned long ReadUptime10msSafe(void);
+ 116          static void UpdateHX711FaultState(void);
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 3   
 
- 117   1          TR0 = 1;
- 118   1          ET0 = 1;
- 119   1          EA  = 1;
- 120   1      }
- 121          
- 122          void Delay(unsigned int t)
- 123          {
- 124   1          unsigned char i, j;
- 125   1          while(t--)
- 126   1          {
- 127   2              i = 2; j = 199;
- 128   2              do { while (--j); } while (--i);
- 129   2          }
- 130   1      }
- 131          
- 132          unsigned long GetWeight_NoWait(void)
- 133          {
- 134   1          unsigned long Temp = 0;
- 135   1          unsigned char i;
- 136   1          bit ea_bak = EA;
- 137   1      
- 138   1          HX711_SCK = 0;
- 139   1          Temp = 0;
- 140   1      
- 141   1          for(i = 0; i < 24; i++)
- 142   1          {
- 143   2              EA = 0;
- 144   2              HX711_SCK = 1; _nop_();
- 145   2              Temp <<= 1;
- 146   2              if(HX711_OUT) Temp++;
- 147   2              HX711_SCK = 0; _nop_();
- 148   2              EA = ea_bak;
- 149   2          }
- 150   1      
- 151   1          EA = 0;
- 152   1          HX711_SCK = 1; _nop_();
- 153   1          HX711_SCK = 0; _nop_();
- 154   1          EA = ea_bak;
- 155   1      
- 156   1          if(Temp & 0x00800000) Temp |= 0xFF000000;
- 157   1          return Temp;
- 158   1      }
- 159          
- 160          static bit HX711_IsReadyStable(void)
- 161          {
- 162   1          unsigned char i;
- 163   1          for(i = 0; i < HX711_READY_STABLE_COUNT; i++)
- 164   1          {
- 165   2              if(HX711_OUT) return 0;
- 166   2              _nop_(); _nop_();
- 167   2          }
- 168   1          return 1;
- 169   1      }
- 170          
- 171          static bit HX711_WaitReady(unsigned long timeout)
- 172          {
- 173   1          while(timeout--)
- 174   1          {
- 175   2              if(!HX711_OUT)
- 176   2              {
- 177   3                  if(HX711_IsReadyStable()) return 1;
- 178   3              }
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 4   
+ 117          
+ 118          void Timer0_Init(void)
+ 119          {
+ 120   1          TMOD &= 0xF0;
+ 121   1          TMOD |= 0x01;      
+ 122   1          TL0 = 0x00;
+ 123   1          TH0 = 0xDC;
+ 124   1          TF0 = 0;
+ 125   1          TR0 = 1;
+ 126   1          ET0 = 1;
+ 127   1          EA  = 1;
+ 128   1      }
+ 129          
+ 130          void Delay(unsigned int t)
+ 131          {
+ 132   1          unsigned char i, j;
+ 133   1          while(t--)
+ 134   1          {
+ 135   2              i = 2; j = 199;
+ 136   2              do { while (--j); } while (--i);
+ 137   2          }
+ 138   1      }
+ 139          
+ 140          unsigned long GetWeight_NoWait(void)
+ 141          {
+ 142   1          unsigned long Temp = 0;
+ 143   1          unsigned char i;
+ 144   1          bit ea_bak = EA;
+ 145   1      
+ 146   1          HX711_SCK = 0;
+ 147   1          Temp = 0;
+ 148   1      
+ 149   1          for(i = 0; i < 24; i++)
+ 150   1          {
+ 151   2              EA = 0;
+ 152   2              HX711_SCK = 1; _nop_();
+ 153   2              Temp <<= 1;
+ 154   2              if(HX711_OUT) Temp++;
+ 155   2              HX711_SCK = 0; _nop_();
+ 156   2              EA = ea_bak;
+ 157   2          }
+ 158   1      
+ 159   1          EA = 0;
+ 160   1          HX711_SCK = 1; _nop_();
+ 161   1          HX711_SCK = 0; _nop_();
+ 162   1          EA = ea_bak;
+ 163   1      
+ 164   1          if(Temp & 0x00800000) Temp |= 0xFF000000;
+ 165   1          return Temp;
+ 166   1      }
+ 167          
+ 168          static bit HX711_IsReadyStable(void)
+ 169          {
+ 170   1          unsigned char i;
+ 171   1          for(i = 0; i < HX711_READY_STABLE_COUNT; i++)
+ 172   1          {
+ 173   2              if(HX711_OUT) return 0;
+ 174   2              _nop_(); _nop_();
+ 175   2          }
+ 176   1          return 1;
+ 177   1      }
+ 178          
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 4   
 
- 179   2          }
- 180   1          return 0;
- 181   1      }
- 182          
- 183          static bit HX711_IsSaturatedLike(long raw)
- 184          {
- 185   1          if(raw > (8388607L - HX711_SAT_MARGIN_COUNTS)) return 1;
- 186   1          if(raw < (-8388608L + HX711_SAT_MARGIN_COUNTS)) return 1;
- 187   1      
- 188   1          if(raw == -1L) return 1;
- 189   1      
- 190   1          return 0;
- 191   1      }
- 192          
- 193          static long HX711_ReadRawSafe(void)
- 194          {
- 195   1          if(!HX711_WaitReady(HX711_WAIT_READY_TIMEOUT))
- 196   1          {
- 197   2              return g_hasLastRaw ? g_lastRawValid : 0L;
- 198   2          }
- 199   1          return (long)GetWeight_NoWait();
- 200   1      }
- 201          
- 202          static long HX711_ReadRawSpikeRejected(void)
- 203          {
- 204   1          long raw = HX711_ReadRawSafe();
- 205   1      
- 206   1          if(HX711_IsSaturatedLike(raw))
- 207   1          {
- 208   2              return g_hasLastRaw ? g_lastRawValid : raw;
- 209   2          }
+ 179          static bit HX711_WaitReady(unsigned long timeout)
+ 180          {
+ 181   1          while(timeout--)
+ 182   1          {
+ 183   2              if(!HX711_OUT)
+ 184   2              {
+ 185   3                  if(HX711_IsReadyStable()) return 1;
+ 186   3              }
+ 187   2          }
+ 188   1          return 0;
+ 189   1      }
+ 190          
+ 191          static bit HX711_IsSaturatedLike(long raw)
+ 192          {
+ 193   1          if(raw > (8388607L - HX711_SAT_MARGIN_COUNTS)) return 1;
+ 194   1          if(raw < (-8388608L + HX711_SAT_MARGIN_COUNTS)) return 1;
+ 195   1      
+ 196   1          if(raw == -1L) return 1;
+ 197   1      
+ 198   1          return 0;
+ 199   1      }
+ 200          
+ 201          static bit HX711_IsDiffOver(long a, long b, long threshold)
+ 202          {
+ 203   1          if(a >= b) return (a - b) > threshold;
+ 204   1          return (b - a) > threshold;
+ 205   1      }
+ 206          
+ 207          static bit HX711_ReadRawFiltered(long* raw)
+ 208          {
+ 209   1          long current = (long)GetWeight_NoWait();
  210   1      
- 211   1          if(!g_hasLastRaw)
+ 211   1          if(HX711_IsSaturatedLike(current))
  212   1          {
- 213   2              g_lastRawValid = raw;
- 214   2              g_hasLastRaw = 1;
- 215   2              return raw;
+ 213   2              g_hx711Fault = 1;
+ 214   2              g_pendingRawCount = 0;
+ 215   2              return 0;
  216   2          }
  217   1      
- 218   1          if(raw > g_lastRawValid)
+ 218   1          if(!g_hasLastRaw)
  219   1          {
- 220   2              if((raw - g_lastRawValid) > HX711_SPIKE_THRESHOLD_COUNTS) return g_lastRawValid;
- 221   2          }
- 222   1          else
- 223   1          {
- 224   2              if((g_lastRawValid - raw) > HX711_SPIKE_THRESHOLD_COUNTS) return g_lastRawValid;
- 225   2          }
- 226   1      
- 227   1          g_lastRawValid = raw;
- 228   1          return raw;
- 229   1      }
- 230          
- 231          long Filter_Weight(long raw)
- 232          {
- 233   1          long sum = 0;
- 234   1          unsigned char i;
- 235   1          
- 236   1          if (g_isFirstSample)
- 237   1          {
- 238   2              for(i=0; i<FILTER_SIZE; i++) Weight_Buffer[i] = raw;
- 239   2              g_isFirstSample = 0;
- 240   2              return raw;
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 5   
+ 220   2              g_lastRawValid = current;
+ 221   2              g_hasLastRaw = 1;
+ 222   2              g_hx711Fault = 0;
+ 223   2              g_pendingRawCount = 0;
+ 224   2              g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+ 225   2              *raw = current;
+ 226   2              return 1;
+ 227   2          }
+ 228   1      
+ 229   1          if(HX711_IsDiffOver(current, g_lastRawValid, HX711_SPIKE_THRESHOLD_COUNTS))
+ 230   1          {
+ 231   2              if(g_pendingRawCount > 0 && !HX711_IsDiffOver(current, g_pendingRaw, HX711_SPIKE_CONFIRM_WINDOW_CO
+             -UNTS))
+ 232   2              {
+ 233   3                  g_pendingRaw = current;
+ 234   3                  g_pendingRawCount++;
+ 235   3                  if(g_pendingRawCount >= HX711_SPIKE_CONFIRM_COUNT)
+ 236   3                  {
+ 237   4                      g_lastRawValid = current;
+ 238   4                      g_pendingRawCount = 0;
+ 239   4                      g_hx711Fault = 0;
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 5   
 
- 241   2          }
- 242   1      
- 243   1          Weight_Buffer[Filter_Index] = raw;
- 244   1          Filter_Index++;
- 245   1          if (Filter_Index >= FILTER_SIZE) Filter_Index = 0;
- 246   1      
- 247   1          for(i=0; i<FILTER_SIZE; i++)
- 248   1          {
- 249   2              sum += Weight_Buffer[i];
- 250   2          }
- 251   1          
- 252   1          return (sum / FILTER_SIZE);
- 253   1      }
- 254          
- 255          static void ResetInput(void)
- 256          {
- 257   1          InputIndex = 0;
- 258   1          InputBuf[0] = '\0';
- 259   1          g_dotPos = -1;
- 260   1          g_fracDigits = 0;
- 261   1          UnitPrice_x100 = 0;
- 262   1          g_inputDirty = 1;
- 263   1          g_priceDirty = 0;
- 264   1      }
- 265          
- 266          static unsigned long ParsePriceToX100(const char* str)
- 267          {
- 268   1          unsigned long val = 0;
- 269   1          unsigned char i = 0;
- 270   1          bit afterDot = 0;
- 271   1          unsigned char frac = 0;
+ 240   4                      g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+ 241   4                      *raw = current;
+ 242   4                      return 1;
+ 243   4                  }
+ 244   3              }
+ 245   2              else
+ 246   2              {
+ 247   3                  g_pendingRaw = current;
+ 248   3                  g_pendingRawCount = 1;
+ 249   3              }
+ 250   2              return 0;
+ 251   2          }
+ 252   1      
+ 253   1          g_lastRawValid = current;
+ 254   1          g_pendingRawCount = 0;
+ 255   1          g_hx711Fault = 0;
+ 256   1          g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+ 257   1          *raw = current;
+ 258   1          return 1;
+ 259   1      }
+ 260          
+ 261          long Filter_Weight(long raw)
+ 262          {
+ 263   1          long sum = 0;
+ 264   1          unsigned char i;
+ 265   1          
+ 266   1          if (g_isFirstSample)
+ 267   1          {
+ 268   2              for(i=0; i<FILTER_SIZE; i++) Weight_Buffer[i] = raw;
+ 269   2              g_isFirstSample = 0;
+ 270   2              return raw;
+ 271   2          }
  272   1      
- 273   1          while(str[i] != '\0')
- 274   1          {
- 275   2              if(str[i] == '.') afterDot = 1;
- 276   2              else if(str[i] >= '0' && str[i] <= '9')
- 277   2              {
- 278   3                  if(!afterDot || frac < 2)
- 279   3                  {
- 280   4                      val = val * 10UL + (unsigned long)(str[i] - '0');
- 281   4                      if(afterDot) frac++;
- 282   4                  }
- 283   3              }
- 284   2              i++;
- 285   2          }
- 286   1      
- 287   1          if(!afterDot) return val * 100UL;
- 288   1          if(frac == 0) return val * 100UL;
- 289   1          if(frac == 1) return val * 10UL;
- 290   1          return val;
- 291   1      }
- 292          
- 293          static void ShowInputStringIfDirty(void)
- 294          {
- 295   1          if(!g_inputDirty) return;
- 296   1          g_inputDirty = 0;
- 297   1          LCD_ShowString(2, 3, "      ");
- 298   1          if(InputIndex == 0) LCD_ShowString(2, 3, "00.00");
- 299   1          else LCD_ShowString(2, 3, InputBuf);
- 300   1      }
- 301          
- 302          static void Init_Display(void)
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 6   
+ 273   1          Weight_Buffer[Filter_Index] = raw;
+ 274   1          Filter_Index++;
+ 275   1          if (Filter_Index >= FILTER_SIZE) Filter_Index = 0;
+ 276   1      
+ 277   1          for(i=0; i<FILTER_SIZE; i++)
+ 278   1          {
+ 279   2              sum += Weight_Buffer[i];
+ 280   2          }
+ 281   1          
+ 282   1          return (sum / FILTER_SIZE);
+ 283   1      }
+ 284          
+ 285          static void ResetInput(void)
+ 286          {
+ 287   1          InputIndex = 0;
+ 288   1          InputBuf[0] = '\0';
+ 289   1          g_dotPos = -1;
+ 290   1          g_fracDigits = 0;
+ 291   1          UnitPrice_x100 = 0;
+ 292   1          g_inputDirty = 1;
+ 293   1          g_priceDirty = 0;
+ 294   1      }
+ 295          
+ 296          static unsigned long ParsePriceToX100(const char* str)
+ 297          {
+ 298   1          unsigned long val = 0;
+ 299   1          unsigned char i = 0;
+ 300   1          bit afterDot = 0;
+ 301   1          unsigned char frac = 0;
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 6   
 
- 303          {
- 304   1          LCD_Clear();
- 305   1          Buzzer_Off();
- 306   1          
- 307   1          lastNetWeight = 0x7FFFFFFF;
- 308   1          lastUnitPrice_x100 = 0xFFFFFFFFUL;
- 309   1          lastTotal_fen = 0xFFFFFFFFUL;
- 310   1          lastWeightNeg = 0;
- 311   1          last_dht_temp = 0xFFFF;
- 312   1          last_dht_humi = 0xFFFF;
- 313   1      
- 314   1          if (SystemMode == 0)
- 315   1          {
- 316   2              LCD_ShowString(1, 1, "W:");
- 317   2              LCD_ShowChar(1, 3, ' ');
- 318   2              LCD_ShowString(1, 9, "g ");
- 319   2              LCD_ShowString(2, 1, "U:");
- 320   2              LCD_ShowString(2, 9, "T:");
- 321   2              LCD_ShowChar(2, 14, '.');
- 322   2              ResetInput();
- 323   2              ShowInputStringIfDirty();
- 324   2              UpdateScaleDisplay();
- 325   2          }
- 326   1          else if (SystemMode == 1)
- 327   1          {
- 328   2              LCD_ShowChar(1, 8, '-');
- 329   2              LCD_ShowChar(1, 11, '-');
- 330   2              LCD_ShowChar(2, 6, ':');
- 331   2              LCD_ShowChar(2, 9, ':');
- 332   2              UpdateClockDisplay();
- 333   2          }
- 334   1          else
- 335   1          {
- 336   2              LCD_ShowString(1, 1, "Temp: --.- C");
- 337   2              LCD_ShowString(2, 1, "Humi: --.- %");
- 338   2              dht_div = 1;
- 339   2          }
- 340   1      }
- 341          
- 342          static void ProcessKey(unsigned char key)
- 343          {
- 344   1          unsigned char removed;
- 345   1      
- 346   1          if(key == KEY_MODE)
- 347   1          {
- 348   2              SystemMode = (SystemMode == 1) ? 0 : 1;
- 349   2              Init_Display();
- 350   2              return;
- 351   2          }
- 352   1          if(key == KEY_DHT11)
- 353   1          {
- 354   2              SystemMode = (SystemMode == 2) ? 0 : 2;
- 355   2              Init_Display();
- 356   2              return;
- 357   2          }
- 358   1      
- 359   1          if(SystemMode != 0) return;
- 360   1      
- 361   1          if(key <= 9)
- 362   1          {
- 363   2              if(g_dotPos >= 0 && g_fracDigits >= 2) return;
- 364   2              if(InputIndex < 6)
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 7   
+ 302   1      
+ 303   1          while(str[i] != '\0')
+ 304   1          {
+ 305   2              if(str[i] == '.') afterDot = 1;
+ 306   2              else if(str[i] >= '0' && str[i] <= '9')
+ 307   2              {
+ 308   3                  if(!afterDot || frac < 2)
+ 309   3                  {
+ 310   4                      val = val * 10UL + (unsigned long)(str[i] - '0');
+ 311   4                      if(afterDot) frac++;
+ 312   4                  }
+ 313   3              }
+ 314   2              i++;
+ 315   2          }
+ 316   1      
+ 317   1          if(!afterDot) return val * 100UL;
+ 318   1          if(frac == 0) return val * 100UL;
+ 319   1          if(frac == 1) return val * 10UL;
+ 320   1          return val;
+ 321   1      }
+ 322          
+ 323          static void ShowInputStringIfDirty(void)
+ 324          {
+ 325   1          if(!g_inputDirty) return;
+ 326   1          g_inputDirty = 0;
+ 327   1          LCD_ShowString(2, 3, "      ");
+ 328   1          if(InputIndex == 0) LCD_ShowString(2, 3, "00.00");
+ 329   1          else LCD_ShowString(2, 3, InputBuf);
+ 330   1      }
+ 331          
+ 332          static void Init_Display(void)
+ 333          {
+ 334   1          LCD_Clear();
+ 335   1          Buzzer_Off();
+ 336   1          
+ 337   1          lastNetWeight = 0x7FFFFFFF;
+ 338   1          lastUnitPrice_x100 = 0xFFFFFFFFUL;
+ 339   1          lastTotal_fen = 0xFFFFFFFFUL;
+ 340   1          lastWeightNeg = 0;
+ 341   1          last_dht_temp = 0xFFFF;
+ 342   1          last_dht_humi = 0xFFFF;
+ 343   1      
+ 344   1          if (SystemMode == 0)
+ 345   1          {
+ 346   2              LCD_ShowString(1, 1, "W:");
+ 347   2              LCD_ShowChar(1, 3, ' ');
+ 348   2              LCD_ShowString(1, 9, "g ");
+ 349   2              LCD_ShowString(2, 1, "U:");
+ 350   2              LCD_ShowString(2, 9, "T:");
+ 351   2              LCD_ShowChar(2, 14, '.');
+ 352   2              ResetInput();
+ 353   2              ShowInputStringIfDirty();
+ 354   2              UpdateScaleDisplay();
+ 355   2          }
+ 356   1          else if (SystemMode == 1)
+ 357   1          {
+ 358   2              LCD_ShowChar(1, 8, '-');
+ 359   2              LCD_ShowChar(1, 11, '-');
+ 360   2              LCD_ShowChar(2, 6, ':');
+ 361   2              LCD_ShowChar(2, 9, ':');
+ 362   2              UpdateClockDisplay();
+ 363   2          }
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 7   
 
- 365   2              {
- 366   3                  InputBuf[InputIndex++] = (char)('0' + key);
- 367   3                  InputBuf[InputIndex] = '\0';
- 368   3                  if(g_dotPos >= 0) g_fracDigits++;
- 369   3                  g_inputDirty = 1;
- 370   3                  g_priceDirty = 1;
- 371   3              }
- 372   2              return;
- 373   2          }
- 374   1      
- 375   1          if(key == KEY_DOT)
- 376   1          {
- 377   2              if(g_dotPos >= 0) return;
- 378   2              if(InputIndex == 0)
- 379   2              {
- 380   3                  if(InputIndex < 5) { InputBuf[InputIndex++] = '0'; InputBuf[InputIndex] = '\0'; }
- 381   3                  else return;
- 382   3              }
- 383   2              if(InputIndex < 6)
- 384   2              {
- 385   3                  g_dotPos = (signed char)InputIndex;
- 386   3                  InputBuf[InputIndex++] = '.';
- 387   3                  InputBuf[InputIndex] = '\0';
- 388   3                  g_fracDigits = 0;
- 389   3                  g_inputDirty = 1;
- 390   3                  g_priceDirty = 1;
- 391   3              }
- 392   2              return;
- 393   2          }
- 394   1      
- 395   1          if(key == KEY_TARE)
- 396   1          {
- 397   2              FurResult = TotalResult;
- 398   2              lastNetWeight = 0x7FFFFFFF;
- 399   2              return;
- 400   2          }
- 401   1      
- 402   1          if(key == KEY_CLEAR)
- 403   1          {
- 404   2              ResetInput();
- 405   2              return;
- 406   2          }
- 407   1      
- 408   1          if(key == KEY_BACKSPACE)
- 409   1          {
- 410   2              if(InputIndex == 0) return;
- 411   2              removed = (unsigned char)InputBuf[InputIndex - 1];
- 412   2              InputIndex--;
- 413   2              InputBuf[InputIndex] = '\0';
- 414   2              if(removed == '.') { g_dotPos = -1; g_fracDigits = 0; }
- 415   2              else { if(g_dotPos >= 0 && InputIndex > (unsigned char)g_dotPos && g_fracDigits > 0) g_fracDigits-
+ 364   1          else
+ 365   1          {
+ 366   2              LCD_ShowString(1, 1, "Temp: --.- C");
+ 367   2              LCD_ShowString(2, 1, "Humi: --.- %");
+ 368   2              dht_div = 1;
+ 369   2          }
+ 370   1      }
+ 371          
+ 372          static void ProcessKey(unsigned char key)
+ 373          {
+ 374   1          unsigned char removed;
+ 375   1      
+ 376   1          if(key == KEY_MODE)
+ 377   1          {
+ 378   2              SystemMode = (SystemMode == 1) ? 0 : 1;
+ 379   2              Init_Display();
+ 380   2              return;
+ 381   2          }
+ 382   1          if(key == KEY_DHT11)
+ 383   1          {
+ 384   2              SystemMode = (SystemMode == 2) ? 0 : 2;
+ 385   2              Init_Display();
+ 386   2              return;
+ 387   2          }
+ 388   1      
+ 389   1          if(SystemMode != 0) return;
+ 390   1      
+ 391   1          if(key <= 9)
+ 392   1          {
+ 393   2              if(g_dotPos >= 0 && g_fracDigits >= 2) return;
+ 394   2              if(InputIndex < 6)
+ 395   2              {
+ 396   3                  InputBuf[InputIndex++] = (char)('0' + key);
+ 397   3                  InputBuf[InputIndex] = '\0';
+ 398   3                  if(g_dotPos >= 0) g_fracDigits++;
+ 399   3                  g_inputDirty = 1;
+ 400   3                  g_priceDirty = 1;
+ 401   3              }
+ 402   2              return;
+ 403   2          }
+ 404   1      
+ 405   1          if(key == KEY_DOT)
+ 406   1          {
+ 407   2              if(g_dotPos >= 0) return;
+ 408   2              if(InputIndex == 0)
+ 409   2              {
+ 410   3                  if(InputIndex < 5) { InputBuf[InputIndex++] = '0'; InputBuf[InputIndex] = '\0'; }
+ 411   3                  else return;
+ 412   3              }
+ 413   2              if(InputIndex < 6)
+ 414   2              {
+ 415   3                  g_dotPos = (signed char)InputIndex;
+ 416   3                  InputBuf[InputIndex++] = '.';
+ 417   3                  InputBuf[InputIndex] = '\0';
+ 418   3                  g_fracDigits = 0;
+ 419   3                  g_inputDirty = 1;
+ 420   3                  g_priceDirty = 1;
+ 421   3              }
+ 422   2              return;
+ 423   2          }
+ 424   1      
+ 425   1          if(key == KEY_TARE)
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 8   
+
+ 426   1          {
+ 427   2              FurResult = TotalResult;
+ 428   2              lastNetWeight = 0x7FFFFFFF;
+ 429   2              return;
+ 430   2          }
+ 431   1      
+ 432   1          if(key == KEY_CLEAR)
+ 433   1          {
+ 434   2              ResetInput();
+ 435   2              return;
+ 436   2          }
+ 437   1      
+ 438   1          if(key == KEY_BACKSPACE)
+ 439   1          {
+ 440   2              if(InputIndex == 0) return;
+ 441   2              removed = (unsigned char)InputBuf[InputIndex - 1];
+ 442   2              InputIndex--;
+ 443   2              InputBuf[InputIndex] = '\0';
+ 444   2              if(removed == '.') { g_dotPos = -1; g_fracDigits = 0; }
+ 445   2              else { if(g_dotPos >= 0 && InputIndex > (unsigned char)g_dotPos && g_fracDigits > 0) g_fracDigits-
              --; }
- 416   2              g_inputDirty = 1;
- 417   2              g_priceDirty = 1;
- 418   2              return;
- 419   2          }
- 420   1      }
- 421          
- 422          static long CalcNetWeightFromDiff(long diff)
- 423          {
- 424   1          long num = diff * 100L;
- 425   1          if(num >= 0) num += (MULTIPLE_X100 / 2);
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 8   
+ 446   2              g_inputDirty = 1;
+ 447   2              g_priceDirty = 1;
+ 448   2              return;
+ 449   2          }
+ 450   1      }
+ 451          
+ 452          static long CalcNetWeightFromDiff(long diff)
+ 453          {
+ 454   1          long num = diff * 100L;
+ 455   1          if(num >= 0) num += (MULTIPLE_X100 / 2);
+ 456   1          else         num -= (MULTIPLE_X100 / 2);
+ 457   1          return (num / MULTIPLE_X100);
+ 458   1      }
+ 459          
+ 460          static void UpdateScaleDisplay(void)
+ 461          {
+ 462   1          long WeightDiff;
+ 463   1          unsigned long total_fen;
+ 464   1          unsigned int TotalInt, TotalDec;
+ 465   1          bit neg;
+ 466   1      
+ 467   1          ShowInputStringIfDirty();
+ 468   1          UpdateHX711FaultState();
+ 469   1      
+ 470   1          if(g_priceDirty)
+ 471   1          {
+ 472   2              g_priceDirty = 0;
+ 473   2              UnitPrice_x100 = (InputIndex == 0) ? 0 : ParsePriceToX100(InputBuf);
+ 474   2          }
+ 475   1      
+ 476   1          if(g_hx711Fault)
+ 477   1          {
+ 478   2              Buzzer_Off();
+ 479   2              if(lastWeightNeg)
+ 480   2              {
+ 481   3                  LCD_ShowChar(1, 3, ' ');
+ 482   3                  lastWeightNeg = 0;
+ 483   3              }
+ 484   2              LCD_ShowString(1, 4, " ERR ");
+ 485   2              if(lastTotal_fen != 0 || UnitPrice_x100 != lastUnitPrice_x100)
+ 486   2              {
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 9   
 
- 426   1          else         num -= (MULTIPLE_X100 / 2);
- 427   1          return (num / MULTIPLE_X100);
- 428   1      }
- 429          
- 430          static void UpdateScaleDisplay(void)
- 431          {
- 432   1          long WeightDiff;
- 433   1          unsigned long total_fen;
- 434   1          unsigned int TotalInt, TotalDec;
- 435   1          bit neg;
- 436   1      
- 437   1          ShowInputStringIfDirty();
- 438   1      
- 439   1          if(g_priceDirty)
- 440   1          {
- 441   2              g_priceDirty = 0;
- 442   2              UnitPrice_x100 = (InputIndex == 0) ? 0 : ParsePriceToX100(InputBuf);
- 443   2          }
- 444   1      
- 445   1          WeightDiff = TotalResult - FurResult;
- 446   1          NetWeight = CalcNetWeightFromDiff(WeightDiff);
- 447   1          
- 448   1          if(NetWeight >= -WEIGHT_NOISE_THRESHOLD && NetWeight <= WEIGHT_NOISE_THRESHOLD) NetWeight = 0;
- 449   1          if(g_screenOff) { Buzzer_Off(); }
- 450   1          else
- 451   1          {
- 452   2              if(NetWeight > 1000) Buzzer_Alarm(20, 50);
- 453   2              else Buzzer_Off();
- 454   2          }
- 455   1      
- 456   1          neg = (NetWeight < 0) ? 1 : 0;
- 457   1          NetWeightAbs = (neg) ? (unsigned long)(-NetWeight) : (unsigned long)NetWeight;
- 458   1      
- 459   1          if(neg != lastWeightNeg)
- 460   1          {
- 461   2              LCD_ShowChar(1, 3, neg ? '-' : ' ');
- 462   2              lastWeightNeg = neg;
- 463   2          }
- 464   1      
- 465   1          if(NetWeight != lastNetWeight)
- 466   1          {
- 467   2              LCD_ShowNum(1, 4, NetWeightAbs, 5);
- 468   2              lastNetWeight = NetWeight;
- 469   2          }
- 470   1      
- 471   1          if(!neg) total_fen = (unsigned long)NetWeightAbs * (unsigned long)UnitPrice_x100 / 1000UL;
- 472   1          else total_fen = 0;
- 473   1      
- 474   1          if(total_fen != lastTotal_fen || UnitPrice_x100 != lastUnitPrice_x100)
- 475   1          {
- 476   2              lastTotal_fen = total_fen;
- 477   2              lastUnitPrice_x100 = UnitPrice_x100;
- 478   2              TotalInt = (unsigned int)(total_fen / 100UL);
- 479   2              TotalDec = (unsigned int)(total_fen % 100UL);
- 480   2              LCD_ShowNum(2, 11, TotalInt, 3);
- 481   2              LCD_ShowNum(2, 15, TotalDec, 2);
- 482   2          }
- 483   1      }
- 484          
- 485          static void UpdateScaleLogicOnly(void)
- 486          {
- 487   1          long WeightDiff;
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 9   
+ 487   3                  lastTotal_fen = 0;
+ 488   3                  lastUnitPrice_x100 = UnitPrice_x100;
+ 489   3                  LCD_ShowNum(2, 11, 0, 3);
+ 490   3                  LCD_ShowNum(2, 15, 0, 2);
+ 491   3              }
+ 492   2              lastNetWeight = 0x7FFFFFFF;
+ 493   2              NetWeight = 0;
+ 494   2              NetWeightAbs = 0;
+ 495   2              return;
+ 496   2          }
+ 497   1      
+ 498   1          WeightDiff = TotalResult - FurResult;
+ 499   1          NetWeight = CalcNetWeightFromDiff(WeightDiff);
+ 500   1          
+ 501   1          if(NetWeight >= -WEIGHT_NOISE_THRESHOLD && NetWeight <= WEIGHT_NOISE_THRESHOLD) NetWeight = 0;
+ 502   1          if(g_screenOff) { Buzzer_Off(); }
+ 503   1          else
+ 504   1          {
+ 505   2              if(NetWeight > 1000) Buzzer_Alarm(20, 50);
+ 506   2              else Buzzer_Off();
+ 507   2          }
+ 508   1      
+ 509   1          neg = (NetWeight < 0) ? 1 : 0;
+ 510   1          NetWeightAbs = (neg) ? (unsigned long)(-NetWeight) : (unsigned long)NetWeight;
+ 511   1      
+ 512   1          if(neg != lastWeightNeg)
+ 513   1          {
+ 514   2              LCD_ShowChar(1, 3, neg ? '-' : ' ');
+ 515   2              lastWeightNeg = neg;
+ 516   2          }
+ 517   1      
+ 518   1          if(NetWeight != lastNetWeight)
+ 519   1          {
+ 520   2              LCD_ShowNum(1, 4, NetWeightAbs, 5);
+ 521   2              lastNetWeight = NetWeight;
+ 522   2          }
+ 523   1      
+ 524   1          if(!neg) total_fen = (unsigned long)NetWeightAbs * (unsigned long)UnitPrice_x100 / 1000UL;
+ 525   1          else total_fen = 0;
+ 526   1      
+ 527   1          if(total_fen != lastTotal_fen || UnitPrice_x100 != lastUnitPrice_x100)
+ 528   1          {
+ 529   2              lastTotal_fen = total_fen;
+ 530   2              lastUnitPrice_x100 = UnitPrice_x100;
+ 531   2              TotalInt = (unsigned int)(total_fen / 100UL);
+ 532   2              TotalDec = (unsigned int)(total_fen % 100UL);
+ 533   2              LCD_ShowNum(2, 11, TotalInt, 3);
+ 534   2              LCD_ShowNum(2, 15, TotalDec, 2);
+ 535   2          }
+ 536   1      }
+ 537          
+ 538          static void UpdateScaleLogicOnly(void)
+ 539          {
+ 540   1          long WeightDiff;
+ 541   1          UpdateHX711FaultState();
+ 542   1          if(g_hx711Fault)
+ 543   1          {
+ 544   2              NetWeight = 0;
+ 545   2              NetWeightAbs = 0;
+ 546   2              Buzzer_Off();
+ 547   2              return;
+ 548   2          }
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 10  
 
- 488   1          WeightDiff = TotalResult - FurResult;
- 489   1          NetWeight = CalcNetWeightFromDiff(WeightDiff);
- 490   1          if(NetWeight >= -WEIGHT_NOISE_THRESHOLD && NetWeight <= WEIGHT_NOISE_THRESHOLD) NetWeight = 0;
- 491   1          Buzzer_Off();
- 492   1      }
- 493          
- 494          static void UpdateClockDisplay(void)
- 495          {
- 496   1          DS1302_ReadTime();
- 497   1          year   = 2000 + DS1302_Time[0];
- 498   1          month  = DS1302_Time[1];
- 499   1          day    = DS1302_Time[2];
- 500   1          hour   = DS1302_Time[3];
- 501   1          minute = DS1302_Time[4];
- 502   1          second = DS1302_Time[5];
- 503   1      
- 504   1          LCD_ShowNum(1, 4, year, 4);
- 505   1          LCD_ShowNum(1, 9, month, 2);
- 506   1          LCD_ShowNum(1, 12, day, 2);
- 507   1          LCD_ShowNum(2, 4, hour, 2);
- 508   1          LCD_ShowNum(2, 7, minute, 2);
- 509   1          LCD_ShowNum(2, 10, second, 2);
- 510   1      }
- 511          
- 512          static void UpdateDHTDisplay(void)
- 513          {
- 514   1          if(dht_div == 0) { dht_div = 1; return; }
- 515   1          dht_div = 0;
- 516   1      
- 517   1          Dht11_Get_Temp_Humi_Value(&dht_temp, &dht_humi);
- 518   1      
- 519   1          if(dht_temp != last_dht_temp)
- 520   1          {
- 521   2              last_dht_temp = dht_temp;
- 522   2              LCD_ShowNum(1, 7, dht_temp/10, 2);
- 523   2              LCD_ShowChar(1, 9, '.');
- 524   2              LCD_ShowNum(1, 10, dht_temp%10, 1);
- 525   2          }
- 526   1          if(dht_humi != last_dht_humi)
- 527   1          {
- 528   2              last_dht_humi = dht_humi;
- 529   2              LCD_ShowNum(2, 7, dht_humi/10, 2);
- 530   2              LCD_ShowChar(2, 9, '.');
- 531   2              LCD_ShowNum(2, 10, dht_humi%10, 1);
- 532   2          }
- 533   1      }
- 534          
- 535          static unsigned long ReadUptime10msSafe(void)
- 536          {
- 537   1          unsigned long t;
- 538   1          bit ea_bak = EA;
- 539   1          EA = 0;
- 540   1          t = g_uptime10ms;
- 541   1          EA = ea_bak;
- 542   1          return t;
- 543   1      }
- 544          
- 545          static void MarkActivity(void)
- 546          {
- 547   1          g_lastActivityTick10ms = ReadUptime10msSafe();
- 548   1      }
- 549          
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 10  
-
- 550          static void Screen_Off(void)
- 551          {
- 552   1          if(g_screenOff) return;
- 553   1          g_screenOff = 1;
- 554   1          Buzzer_Off();
- 555   1          LCD_Clear();
- 556   1      }
- 557          
- 558          static void Screen_On(void)
- 559          {
- 560   1          g_screenOff = 0;
- 561   1          Init_Display();
- 562   1          MarkActivity();
- 563   1      }
- 564          
- 565          void main(void)
- 566          {
- 567   1          unsigned char key;
- 568   1          unsigned char timeFlag;
- 569   1          long rawWeight;
- 570   1          unsigned char k;
- 571   1      
- 572   1          HX711_SCK = 0;
- 573   1          Buzzer_Init();
- 574   1          LCD_Init();
- 575   1      
- 576   1          LCD_ShowString(1, 1, "Name: xxx");
- 577   1          LCD_ShowString(2, 1, "ID: 222xxxxxxx");
- 578   1          
- 579   1          for(k=0; k<3; k++)
- 580   1          {
- 581   2              Delay(1000); 
- 582   2          }
- 583   1          
- 584   1          DS1302_Init();
- 585   1      
- 586   1          timeFlag = DS1302_ReadByte(0xC0);
- 587   1          if(timeFlag != 0xAA)
+ 549   1          WeightDiff = TotalResult - FurResult;
+ 550   1          NetWeight = CalcNetWeightFromDiff(WeightDiff);
+ 551   1          if(NetWeight >= -WEIGHT_NOISE_THRESHOLD && NetWeight <= WEIGHT_NOISE_THRESHOLD) NetWeight = 0;
+ 552   1          Buzzer_Off();
+ 553   1      }
+ 554          
+ 555          static void UpdateClockDisplay(void)
+ 556          {
+ 557   1          DS1302_ReadTime();
+ 558   1          year   = 2000 + DS1302_Time[0];
+ 559   1          month  = DS1302_Time[1];
+ 560   1          day    = DS1302_Time[2];
+ 561   1          hour   = DS1302_Time[3];
+ 562   1          minute = DS1302_Time[4];
+ 563   1          second = DS1302_Time[5];
+ 564   1      
+ 565   1          LCD_ShowNum(1, 4, year, 4);
+ 566   1          LCD_ShowNum(1, 9, month, 2);
+ 567   1          LCD_ShowNum(1, 12, day, 2);
+ 568   1          LCD_ShowNum(2, 4, hour, 2);
+ 569   1          LCD_ShowNum(2, 7, minute, 2);
+ 570   1          LCD_ShowNum(2, 10, second, 2);
+ 571   1      }
+ 572          
+ 573          static void UpdateDHTDisplay(void)
+ 574          {
+ 575   1          if(dht_div == 0) { dht_div = 1; return; }
+ 576   1          dht_div = 0;
+ 577   1      
+ 578   1          Dht11_Get_Temp_Humi_Value(&dht_temp, &dht_humi);
+ 579   1      
+ 580   1          if(dht_temp != last_dht_temp)
+ 581   1          {
+ 582   2              last_dht_temp = dht_temp;
+ 583   2              LCD_ShowNum(1, 7, dht_temp/10, 2);
+ 584   2              LCD_ShowChar(1, 9, '.');
+ 585   2              LCD_ShowNum(1, 10, dht_temp%10, 1);
+ 586   2          }
+ 587   1          if(dht_humi != last_dht_humi)
  588   1          {
- 589   2              DS1302_SetTime();
- 590   2              DS1302_WriteByte(0x8E, 0x00);
- 591   2              DS1302_WriteByte(0xC0, 0xAA);
- 592   2              DS1302_WriteByte(0x8E, 0x80);
- 593   2              Delay(500);
- 594   2          }
- 595   1      
- 596   1          Timer0_Init();
- 597   1      
- 598   1          HX711_WaitReady(HX711_WAIT_READY_TIMEOUT);
- 599   1      
- 600   1          rawWeight = HX711_ReadRawSafe();
- 601   1          FurResult = Filter_Weight(rawWeight);
- 602   1          g_lastRawValid = rawWeight;
- 603   1          g_hasLastRaw = 1;
- 604   1      
- 605   1          for(key=0; key<10; key++)
- 606   1          {
- 607   2              rawWeight = HX711_ReadRawSafe();
- 608   2          }
- 609   1          rawWeight = HX711_ReadRawSafe();
- 610   1          FurResult = Filter_Weight(rawWeight);
- 611   1          g_lastRawValid = rawWeight;
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 11  
+ 589   2              last_dht_humi = dht_humi;
+ 590   2              LCD_ShowNum(2, 7, dht_humi/10, 2);
+ 591   2              LCD_ShowChar(2, 9, '.');
+ 592   2              LCD_ShowNum(2, 10, dht_humi%10, 1);
+ 593   2          }
+ 594   1      }
+ 595          
+ 596          static unsigned long ReadUptime10msSafe(void)
+ 597          {
+ 598   1          unsigned long t;
+ 599   1          bit ea_bak = EA;
+ 600   1          EA = 0;
+ 601   1          t = g_uptime10ms;
+ 602   1          EA = ea_bak;
+ 603   1          return t;
+ 604   1      }
+ 605          
+ 606          static void UpdateHX711FaultState(void)
+ 607          {
+ 608   1          unsigned long now = ReadUptime10msSafe();
+ 609   1      
+ 610   1          if(g_hasLastRaw)
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 11  
 
- 612   1      
- 613   1          SystemMode = 0;
- 614   1          Init_Display();
- 615   1      
- 616   1          g_screenOff = 0;
- 617   1          g_lastActivityTick10ms = g_uptime10ms;
- 618   1          g_lastTotalForActivity = TotalResult;
- 619   1      
- 620   1          {
- 621   2              unsigned char lastTick = g_tick10ms;
- 622   2      
- 623   2              while(1)
- 624   2              {
- 625   3                  while(lastTick != g_tick10ms)
- 626   3                  {
- 627   4                      lastTick++;
- 628   4      
- 629   4                      key = Key_Scan();
- 630   4                      if(key != KEY_NONE)
- 631   4                      {
- 632   5                          if(g_screenOff) Screen_On();
- 633   5                          ProcessKey(key);
- 634   5                          MarkActivity();
- 635   5                      }
- 636   4      
- 637   4                      if(SystemMode == 0 && HX711_IsReadyStable())
- 638   4                      {
- 639   5                          rawWeight = HX711_ReadRawSpikeRejected();
- 640   5                          TotalResult = Filter_Weight(rawWeight);
- 641   5                          {
- 642   6                              long d = TotalResult - g_lastTotalForActivity;
- 643   6                              if(d > RAW_ACTIVITY_THRESHOLD || d < -RAW_ACTIVITY_THRESHOLD)
- 644   6                              {
- 645   7                                  g_lastTotalForActivity = TotalResult;
- 646   7                                  if(g_screenOff) Screen_On();
- 647   7                                  MarkActivity();
- 648   7                              }
- 649   6                          }
- 650   5                      }
- 651   4                  }
- 652   3      
- 653   3                  while(g_evt200ms)
- 654   3                  {
- 655   4                      g_evt200ms--;
- 656   4                      if(SystemMode == 0)
- 657   4                      {
- 658   5      
- 659   5                          if(g_screenOff)
- 660   5                          {
- 661   6                              UpdateScaleLogicOnly();
- 662   6                          }
- 663   5                          else
- 664   5                          {
- 665   6                              UpdateScaleDisplay();
- 666   6                          }
- 667   5                      }
- 668   4                  }
- 669   3      
- 670   3                  while(g_evt500ms)
- 671   3                  {
- 672   4                      g_evt500ms--;
- 673   4                      if(g_screenOff) {  }
-C51 COMPILER V9.60.0.0   MAIN                                                              02/20/2026 19:33:21 PAGE 12  
+ 611   1          {
+ 612   2              if((now - g_lastHx711SampleTick10ms) >= HX711_SAMPLE_TIMEOUT_TICKS) g_hx711Fault = 1;
+ 613   2          }
+ 614   1          else
+ 615   1          {
+ 616   2              if(now >= HX711_SAMPLE_TIMEOUT_TICKS) g_hx711Fault = 1;
+ 617   2          }
+ 618   1      }
+ 619          
+ 620          static void MarkActivity(void)
+ 621          {
+ 622   1          g_lastActivityTick10ms = ReadUptime10msSafe();
+ 623   1      }
+ 624          
+ 625          static void Screen_Off(void)
+ 626          {
+ 627   1          if(g_screenOff) return;
+ 628   1          g_screenOff = 1;
+ 629   1          Buzzer_Off();
+ 630   1          LCD_Clear();
+ 631   1      }
+ 632          
+ 633          static void Screen_On(void)
+ 634          {
+ 635   1          g_screenOff = 0;
+ 636   1          Init_Display();
+ 637   1          MarkActivity();
+ 638   1      }
+ 639          
+ 640          void main(void)
+ 641          {
+ 642   1          unsigned char key;
+ 643   1          unsigned char timeFlag;
+ 644   1          long rawWeight;
+ 645   1          unsigned char k;
+ 646   1      
+ 647   1          HX711_SCK = 0;
+ 648   1          Buzzer_Init();
+ 649   1          LCD_Init();
+ 650   1      
+ 651   1          LCD_ShowString(1, 1, "Name: xxx");
+ 652   1          LCD_ShowString(2, 1, "ID: 222xxxxxxx");
+ 653   1          
+ 654   1          for(k=0; k<3; k++)
+ 655   1          {
+ 656   2              Delay(1000); 
+ 657   2          }
+ 658   1          
+ 659   1          DS1302_Init();
+ 660   1      
+ 661   1          timeFlag = DS1302_ReadByte(0xC0);
+ 662   1          if(timeFlag != 0xAA)
+ 663   1          {
+ 664   2              DS1302_SetTime();
+ 665   2              DS1302_WriteByte(0x8E, 0x00);
+ 666   2              DS1302_WriteByte(0xC0, 0xAA);
+ 667   2              DS1302_WriteByte(0x8E, 0x80);
+ 668   2              Delay(500);
+ 669   2          }
+ 670   1      
+ 671   1          Timer0_Init();
+ 672   1      
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 12  
 
- 674   4                      else
- 675   4                      {
- 676   5                          if(SystemMode == 1) UpdateClockDisplay();
- 677   5                          else if(SystemMode == 2) UpdateDHTDisplay();
- 678   5                      }
- 679   4                  }
- 680   3      
- 681   3                  if(!g_screenOff)
- 682   3                  {
- 683   4                      unsigned long now = ReadUptime10msSafe();
- 684   4                      if((now - g_lastActivityTick10ms) >= SCREEN_OFF_TIMEOUT_TICKS)
- 685   4                      {
- 686   5                          Screen_Off();
- 687   5                      }
- 688   4                  }
- 689   3      
- 690   3              }
- 691   2          }
- 692   1      }
- 693          
- 694          void Timer0_Routine(void) interrupt 1
- 695          {
- 696   1          static unsigned char cnt200 = 0;
- 697   1          static unsigned char cnt500 = 0;
- 698   1      
- 699   1          TL0 = 0x00;
- 700   1          TH0 = 0xDC; 
- 701   1      
- 702   1          g_tick10ms++;
- 703   1          g_uptime10ms++;
- 704   1          cnt200++;
- 705   1          cnt500++;
- 706   1      
- 707   1          if(cnt200 >= 20) { cnt200 = 0; g_evt200ms++; }
- 708   1          if(cnt500 >= 50) { cnt500 = 0; g_evt500ms++; }
- 709   1      }
+ 673   1          if(HX711_WaitReady(HX711_WAIT_READY_TIMEOUT))
+ 674   1          {
+ 675   2              rawWeight = (long)GetWeight_NoWait();
+ 676   2              if(HX711_IsSaturatedLike(rawWeight))
+ 677   2              {
+ 678   3                  g_hx711Fault = 1;
+ 679   3              }
+ 680   2              else
+ 681   2              {
+ 682   3                  FurResult = Filter_Weight(rawWeight);
+ 683   3                  TotalResult = FurResult;
+ 684   3                  g_lastRawValid = rawWeight;
+ 685   3                  g_hasLastRaw = 1;
+ 686   3                  g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+ 687   3              }
+ 688   2          }
+ 689   1          else
+ 690   1          {
+ 691   2              g_hx711Fault = 1;
+ 692   2          }
+ 693   1      
+ 694   1          for(key=0; key<10; key++)
+ 695   1          {
+ 696   2              if(!HX711_WaitReady(HX711_WAIT_READY_TIMEOUT)) break;
+ 697   2              rawWeight = (long)GetWeight_NoWait();
+ 698   2              if(HX711_IsSaturatedLike(rawWeight))
+ 699   2              {
+ 700   3                  g_hx711Fault = 1;
+ 701   3                  break;
+ 702   3              }
+ 703   2              TotalResult = Filter_Weight(rawWeight);
+ 704   2              FurResult = TotalResult;
+ 705   2              g_lastRawValid = rawWeight;
+ 706   2              g_hasLastRaw = 1;
+ 707   2              g_lastHx711SampleTick10ms = ReadUptime10msSafe();
+ 708   2              g_hx711Fault = 0;
+ 709   2          }
+ 710   1      
+ 711   1          SystemMode = 0;
+ 712   1          Init_Display();
+ 713   1      
+ 714   1          g_screenOff = 0;
+ 715   1          g_lastActivityTick10ms = g_uptime10ms;
+ 716   1          g_lastTotalForActivity = TotalResult;
+ 717   1      
+ 718   1          {
+ 719   2              unsigned char lastTick = g_tick10ms;
+ 720   2      
+ 721   2              while(1)
+ 722   2              {
+ 723   3                  while(lastTick != g_tick10ms)
+ 724   3                  {
+ 725   4                      lastTick++;
+ 726   4      
+ 727   4                      key = Key_Scan();
+ 728   4                      if(key != KEY_NONE)
+ 729   4                      {
+ 730   5                          if(g_screenOff) Screen_On();
+ 731   5                          ProcessKey(key);
+ 732   5                          MarkActivity();
+ 733   5                      }
+ 734   4      
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 13  
+
+ 735   4                      if(SystemMode == 0 && HX711_IsReadyStable())
+ 736   4                      {
+ 737   5                          if(HX711_ReadRawFiltered(&rawWeight))
+ 738   5                          {
+ 739   6                              TotalResult = Filter_Weight(rawWeight);
+ 740   6                              {
+ 741   7                                  long d = TotalResult - g_lastTotalForActivity;
+ 742   7                                  if(d > RAW_ACTIVITY_THRESHOLD || d < -RAW_ACTIVITY_THRESHOLD)
+ 743   7                                  {
+ 744   8                                      g_lastTotalForActivity = TotalResult;
+ 745   8                                      if(g_screenOff) Screen_On();
+ 746   8                                      MarkActivity();
+ 747   8                                  }
+ 748   7                              }
+ 749   6                          }
+ 750   5                      }
+ 751   4                      if(SystemMode == 0) UpdateHX711FaultState();
+ 752   4                  }
+ 753   3      
+ 754   3                  while(g_evt200ms)
+ 755   3                  {
+ 756   4                      g_evt200ms--;
+ 757   4                      if(SystemMode == 0)
+ 758   4                      {
+ 759   5      
+ 760   5                          if(g_screenOff)
+ 761   5                          {
+ 762   6                              UpdateScaleLogicOnly();
+ 763   6                          }
+ 764   5                          else
+ 765   5                          {
+ 766   6                              UpdateScaleDisplay();
+ 767   6                          }
+ 768   5                      }
+ 769   4                  }
+ 770   3      
+ 771   3                  while(g_evt500ms)
+ 772   3                  {
+ 773   4                      g_evt500ms--;
+ 774   4                      if(g_screenOff) {  }
+ 775   4                      else
+ 776   4                      {
+ 777   5                          if(SystemMode == 1) UpdateClockDisplay();
+ 778   5                          else if(SystemMode == 2) UpdateDHTDisplay();
+ 779   5                      }
+ 780   4                  }
+ 781   3      
+ 782   3                  if(!g_screenOff)
+ 783   3                  {
+ 784   4                      unsigned long now = ReadUptime10msSafe();
+ 785   4                      if((now - g_lastActivityTick10ms) >= SCREEN_OFF_TIMEOUT_TICKS)
+ 786   4                      {
+ 787   5                          Screen_Off();
+ 788   5                      }
+ 789   4                  }
+ 790   3      
+ 791   3              }
+ 792   2          }
+ 793   1      }
+ 794          
+ 795          void Timer0_Routine(void) interrupt 1
+ 796          {
+C51 COMPILER V9.60.0.0   MAIN                                                              03/07/2026 19:17:28 PAGE 14  
+
+ 797   1          static unsigned char cnt200 = 0;
+ 798   1          static unsigned char cnt500 = 0;
+ 799   1      
+ 800   1          TL0 = 0x00;
+ 801   1          TH0 = 0xDC; 
+ 802   1      
+ 803   1          g_tick10ms++;
+ 804   1          g_uptime10ms++;
+ 805   1          cnt200++;
+ 806   1          cnt500++;
+ 807   1      
+ 808   1          if(cnt200 >= 20) { cnt200 = 0; g_evt200ms++; }
+ 809   1          if(cnt500 >= 50) { cnt500 = 0; g_evt500ms++; }
+ 810   1      }
 
 
 MODULE INFORMATION:   STATIC OVERLAYABLE
-   CODE SIZE        =   3117    ----
-   CONSTANT SIZE    =     76    ----
+   CODE SIZE        =   3584    ----
+   CONSTANT SIZE    =     82    ----
    XDATA SIZE       =     32    ----
    PDATA SIZE       =   ----    ----
-   DATA SIZE        =     10      57
-   IDATA SIZE       =     72    ----
-   BIT SIZE         =      6       4
+   DATA SIZE        =     10      76
+   IDATA SIZE       =     81    ----
+   BIT SIZE         =      7       4
 END OF MODULE INFORMATION.
 
 
