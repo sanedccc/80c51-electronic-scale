@@ -2,6 +2,7 @@
 /.vscode/
 /.settings
 /.eide/
+/.claude/
 
 # project out
 /build
